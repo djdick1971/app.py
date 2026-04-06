@@ -1,0 +1,83 @@
+import streamlit as st
+import requests
+from datetime import datetime
+
+# --- 1. SETTINGS & THEME ---
+st.set_page_config(
+    page_title="South Hill Command Center",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
+# Custom CSS for a professional "Wall Tablet" look
+st.markdown("""
+    <style>
+    .main { background-color: #0E1117; }
+    [data-testid="stMetricValue"] { font-size: 42px !important; font-weight: 700; color: #00d4ff !important; }
+    [data-testid="stMetricLabel"] { font-size: 16px !important; text-transform: uppercase; letter-spacing: 1px; }
+    .stProgress > div > div > div > div { background-color: #00d4ff; }
+    </style>
+    """, unsafe_allow_html=True)
+
+# --- 2. CONFIGURATION (Stored in Streamlit Secrets) ---
+# When deploying, add these to "Advanced Settings" > "Secrets"
+TEMPEST_TOKEN = st.secrets.get("TEMPEST_TOKEN", "REPLACE_WITH_YOUR_TOKEN")
+STATION_ID = st.secrets.get("STATION_ID", "REPLACE_WITH_YOUR_ID")
+WYZE_URL = "https://my.wyze.com/live"
+
+# --- 3. DATA ENGINE ---
+def get_weather():
+    url = f"https://swd.weatherflow.com/swd/rest/observations/station/{STATION_ID}?token={TEMPEST_TOKEN}"
+    try:
+        response = requests.get(url, timeout=10)
+        data = response.json()
+        return data['obs'][0]
+    except Exception:
+        return None
+
+# --- 4. DASHBOARD LAYOUT ---
+st.title("🏠 SOUTH HILL COMMAND CENTER")
+
+obs = get_weather()
+
+if obs:
+    # Tempest Data Mapping (Standard Index for Tempest Stations)
+    # 7: Temp, 8: Humidity, 6: Pressure, 12: Rain Rate, 18: Daily Rain
+    temp_f = (obs[7] * 9/5) + 32
+    humidity = obs[8]
+    pressure_in = obs[6] * 0.02953
+    rain_rate = obs[12] * 0.03937
+    rain_daily = obs[18] * 0.03937
+
+    # Metric Row
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("TEMP", f"{temp_f:.1f}°F")
+    m2.metric("HUMIDITY", f"{humidity}%")
+    m3.metric("BARO", f"{pressure_in:.2f} inHg")
+    m4.metric("TODAY'S RAIN", f"{rain_daily:.2f}\"", delta=f"{rain_rate:.2f} in/hr" if rain_rate > 0 else None)
+
+st.divider()
+
+# Main View: Camera and Rain Detail
+col_left, col_right = st.columns([3, 1])
+
+with col_left:
+    st.subheader("📷 LIVE CAMERA FEED")
+    # Using an iframe to pull in the Wyze Web Portal
+    st.components.v1.iframe(WYZE_URL, height=500, scrolling=True)
+
+with col_right:
+    st.subheader("🌧️ PRECIPITATION")
+    if obs:
+        # Visual Rain Gauge (Capped at 1 inch for visual scale, adjustable)
+        rain_scale = min(rain_daily / 1.0, 1.0)
+        st.write("Daily Total Progress")
+        st.progress(rain_scale)
+        st.write(f"**{rain_daily:.2f} in**")
+        
+        if rain_rate > 0:
+            st.warning(f"Raining: {rain_rate:.2f} in/hr")
+        else:
+            st.success("No active rain")
+
+st.caption(f"Last Refresh: {datetime.now().strftime('%I:%M:%P')} | Station: {STATION_ID}")
